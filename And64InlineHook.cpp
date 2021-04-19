@@ -46,18 +46,14 @@
 # define  A64_LOGI(...)        ((void)0)
 #endif // NDEBUG
 typedef uint32_t *__restrict *__restrict instruction;
-typedef struct
-{
-    struct fix_info
-    {
+typedef struct {
+    struct fix_info {
         uint32_t *bp;
         uint32_t  ls; // left-shift counts
         uint32_t  ad; // & operand
     };
-    struct insns_info
-    {
-        union
-        {
+    struct insns_info {
+        union {
             uint64_t insu;
             int64_t  ins;
             void    *insp;
@@ -105,8 +101,7 @@ public:
 
 //-------------------------------------------------------------------------
 
-static bool __fix_branch_imm(instruction inpp, instruction outpp, context *ctxp)
-{
+static bool __fix_branch_imm(instruction inpp, instruction outpp, context* ctxp) {
     static constexpr uint32_t mbits = 6u;
     static constexpr uint32_t mask  = 0xfc000000u; // 0b11111100000000000000000000000000
     static constexpr uint32_t rmask = 0x03ffffffu; // 0b00000011111111111111111111111111
@@ -117,61 +112,59 @@ static bool __fix_branch_imm(instruction inpp, instruction outpp, context *ctxp)
     const uint32_t opc = ins & mask;
     switch (opc) {
     case op_b:
-    case op_bl:
-        {
-            intptr_t current_idx  = ctxp->get_and_set_current_index(*inpp, *outpp);
-            int64_t absolute_addr = reinterpret_cast<int64_t>(*inpp) + (static_cast<int32_t>(ins << mbits) >> (mbits - 2u)); // sign-extended
-            int64_t new_pc_offset = static_cast<int64_t>(absolute_addr - reinterpret_cast<int64_t>(*outpp)) >> 2; // shifted
-            bool special_fix_type = ctxp->is_in_fixing_range(absolute_addr);
-            // whether the branch should be converted to absolute jump
-            if (!special_fix_type && llabs(new_pc_offset) >= (rmask >> 1)) {
-                bool b_aligned = (reinterpret_cast<uint64_t>(*outpp + 2) & 7u) == 0u;
-                if (opc == op_b) {
-                    if (b_aligned != true) {
-                        (*outpp)[0] = A64_NOP;
-                        ctxp->reset_current_ins(current_idx, ++(*outpp));
-                    } //if
-                    (*outpp)[0] = 0x58000051u; // LDR X17, #0x8
-                    (*outpp)[1] = 0xd61f0220u; // BR X17
-                    memcpy(*outpp + 2, &absolute_addr, sizeof(absolute_addr));
-                    *outpp += 4;
-                } else {
-                    if (b_aligned == true) {
-                        (*outpp)[0] = A64_NOP;
-                        ctxp->reset_current_ins(current_idx, ++(*outpp));
-                    } //if
-                    (*outpp)[0] = 0x58000071u; // LDR X17, #12
-                    (*outpp)[1] = 0x1000009eu; // ADR X30, #16
-                    (*outpp)[2] = 0xd61f0220u; // BR X17
-                    memcpy(*outpp + 3, &absolute_addr, sizeof(absolute_addr));
-                    *outpp += 5;
+    case op_bl: {
+        intptr_t current_idx  = ctxp->get_and_set_current_index(*inpp, *outpp);
+        int64_t absolute_addr = reinterpret_cast<int64_t>(*inpp) + (static_cast<int32_t>(ins << mbits) >> (mbits - 2u)); // sign-extended
+        int64_t new_pc_offset = static_cast<int64_t>(absolute_addr - reinterpret_cast<int64_t>(*outpp)) >> 2; // shifted
+        bool special_fix_type = ctxp->is_in_fixing_range(absolute_addr);
+        // whether the branch should be converted to absolute jump
+        if (!special_fix_type && llabs(new_pc_offset) >= (rmask >> 1)) {
+            bool b_aligned = (reinterpret_cast<uint64_t>(*outpp + 2) & 7u) == 0u;
+            if (opc == op_b) {
+                if (b_aligned != true) {
+                    (*outpp)[0] = A64_NOP;
+                    ctxp->reset_current_ins(current_idx, ++(*outpp));
                 } //if
+                (*outpp)[0] = 0x58000051u; // LDR X17, #0x8
+                (*outpp)[1] = 0xd61f0220u; // BR X17
+                memcpy(*outpp + 2, &absolute_addr, sizeof(absolute_addr));
+                *outpp += 4;
             } else {
-                if (special_fix_type) {
-                    intptr_t ref_idx = ctxp->get_ref_ins_index(absolute_addr);
-                    if (ref_idx <= current_idx) {
-                        new_pc_offset = static_cast<int64_t>(ctxp->dat[ref_idx].ins - reinterpret_cast<int64_t>(*outpp)) >> 2;
-                    } else {
-                        ctxp->insert_fix_map(ref_idx, *outpp, 0u, rmask);
-                        new_pc_offset = 0;
-                    } //if
+                if (b_aligned == true) {
+                    (*outpp)[0] = A64_NOP;
+                    ctxp->reset_current_ins(current_idx, ++(*outpp));
                 } //if
-
-                (*outpp)[0] = opc | (new_pc_offset & ~mask);
-                ++(*outpp);
+                (*outpp)[0] = 0x58000071u; // LDR X17, #12
+                (*outpp)[1] = 0x1000009eu; // ADR X30, #16
+                (*outpp)[2] = 0xd61f0220u; // BR X17
+                memcpy(*outpp + 3, &absolute_addr, sizeof(absolute_addr));
+                *outpp += 5;
+            } //if
+        } else {
+            if (special_fix_type) {
+                intptr_t ref_idx = ctxp->get_ref_ins_index(absolute_addr);
+                if (ref_idx <= current_idx) {
+                    new_pc_offset = static_cast<int64_t>(ctxp->dat[ref_idx].ins - reinterpret_cast<int64_t>(*outpp)) >> 2;
+                } else {
+                    ctxp->insert_fix_map(ref_idx, *outpp, 0u, rmask);
+                    new_pc_offset = 0;
+                } //if
             } //if
 
-            ++(*inpp);
-            return ctxp->process_fix_map(current_idx), true;
-        }
+            (*outpp)[0] = opc | (new_pc_offset & ~mask);
+            ++(*outpp);
+        } //if
+
+        ++(*inpp);
+        return ctxp->process_fix_map(current_idx), true;
+      }
     }
     return false;
 }
 
 //-------------------------------------------------------------------------
 
-static bool __fix_cond_comp_test_branch(instruction inpp, instruction outpp, context *ctxp)
-{
+static bool __fix_cond_comp_test_branch(instruction inpp, instruction outpp, context* ctxp) {
     static constexpr uint32_t lsb     = 5u;
     static constexpr uint32_t lmask01 = 0xff00001fu; // 0b11111111000000000000000000011111
     static constexpr uint32_t mask0   = 0xff000010u; // 0b11111111000000000000000000010000
@@ -186,8 +179,8 @@ static bool __fix_cond_comp_test_branch(instruction inpp, instruction outpp, con
 
     const uint32_t ins = *(*inpp);
     uint32_t     lmask = lmask01;
-    if ((ins & mask0) != op_bc) {
-        uint32_t opc   = ins & mask1;
+    if ((inuint32_ts & mask0) != op_bc) {
+         opc   = ins & mask1;
         if (opc != op_cbz && opc != op_cbnz) {
             opc = ins & mask2;
             if (opc != op_tbz && opc != op_tbnz) {
@@ -233,8 +226,7 @@ static bool __fix_cond_comp_test_branch(instruction inpp, instruction outpp, con
 
 //-------------------------------------------------------------------------
 
-static bool __fix_loadlit(instruction inpp, instruction outpp, context *ctxp)
-{
+static bool __fix_loadlit(instruction inpp, instruction outpp, context* ctxp) {
     const uint32_t ins = *(*inpp);
 
     // memory prefetch("prfm"), just skip it
@@ -312,8 +304,7 @@ static bool __fix_loadlit(instruction inpp, instruction outpp, context *ctxp)
 
 //-------------------------------------------------------------------------
 
-static bool __fix_pcreladdr(instruction inpp, instruction outpp, context *ctxp)
-{
+static bool __fix_pcreladdr(instruction inpp, instruction outpp, context* ctxp) {
     // Load a PC-relative address into a register
     // http://infocenter.arm.com/help/topic/com.arm.doc.100069_0608_00_en/pge1427897645644.html
     static constexpr uint32_t msb     = 8u;
@@ -330,39 +321,39 @@ static bool __fix_pcreladdr(instruction inpp, instruction outpp, context *ctxp)
     intptr_t current_idx;
     switch (ins & mask) {
     case op_adr:
-        {
-            current_idx           = ctxp->get_and_set_current_index(*inpp, *outpp);
-            int64_t lsb_bytes     = static_cast<uint32_t>(ins << 1u) >> 30u;
-            int64_t absolute_addr = reinterpret_cast<int64_t>(*inpp) + (((static_cast<int32_t>(ins << msb) >> (msb + lsb - 2u)) & ~3u) | lsb_bytes);
-            int64_t new_pc_offset = static_cast<int64_t>(absolute_addr - reinterpret_cast<int64_t>(*outpp));
-            bool special_fix_type = ctxp->is_in_fixing_range(absolute_addr);
-            if (!special_fix_type && llabs(new_pc_offset) >= (max_val >> 1)) {
-                if ((reinterpret_cast<uint64_t>(*outpp + 2) & 7u) != 0u) {
-                    (*outpp)[0] = A64_NOP;
-                    ctxp->reset_current_ins(current_idx, ++(*outpp));
-                } //if
-
-                (*outpp)[0] = 0x58000000u | (((8u >> 2u) << lsb) & ~mask) | (ins & rmask); // LDR #0x8
-                (*outpp)[1] = 0x14000003u; // B #0xc
-                memcpy(*outpp + 2, &absolute_addr, sizeof(absolute_addr));
-                *outpp += 4;
-            } else {
-                if (special_fix_type) {
-                    intptr_t ref_idx = ctxp->get_ref_ins_index(absolute_addr & ~3ull);
-                    if (ref_idx <= current_idx) {
-                        new_pc_offset = static_cast<int64_t>(ctxp->dat[ref_idx].ins - reinterpret_cast<int64_t>(*outpp));
-                    } else {
-                        ctxp->insert_fix_map(ref_idx, *outpp, lsb, fmask);
-                        new_pc_offset = 0;
-                    } //if
-                } //if
-
-                // the lsb_bytes will never be changed, so we can use lmask to keep it
-                (*outpp)[0] = (static_cast<uint32_t>(new_pc_offset << (lsb - 2u)) & fmask) | (ins & lmask);
-                ++(*outpp);
+      {
+        current_idx           = ctxp->get_and_set_current_index(*inpp, *outpp);
+        int64_t lsb_bytes     = static_cast<uint32_t>(ins << 1u) >> 30u;
+        int64_t absolute_addr = reinterpret_cast<int64_t>(*inpp) + (((static_cast<int32_t>(ins << msb) >> (msb + lsb - 2u)) & ~3u) | lsb_bytes);
+        int64_t new_pc_offset = static_cast<int64_t>(absolute_addr - reinterpret_cast<int64_t>(*outpp));
+        bool special_fix_type = ctxp->is_in_fixing_range(absolute_addr);
+        if (!special_fix_type && llabs(new_pc_offset) >= (max_val >> 1)) {
+            if ((reinterpret_cast<uint64_t>(*outpp + 2) & 7u) != 0u) {
+                (*outpp)[0] = A64_NOP;
+                ctxp->reset_current_ins(current_idx, ++(*outpp));
             } //if
-        }
-        break;
+
+            (*outpp)[0] = 0x58000000u | (((8u >> 2u) << lsb) & ~mask) | (ins & rmask); // LDR #0x8
+            (*outpp)[1] = 0x14000003u; // B #0xc
+            memcpy(*outpp + 2, &absolute_addr, sizeof(absolute_addr));
+            *outpp += 4;
+        } else {
+            if (special_fix_type) {
+                intptr_t ref_idx = ctxp->get_ref_ins_index(absolute_addr & ~3ull);
+                if (ref_idx <= current_idx) {
+                    new_pc_offset = static_cast<int64_t>(ctxp->dat[ref_idx].ins - reinterpret_cast<int64_t>(*outpp));
+                } else {
+                    ctxp->insert_fix_map(ref_idx, *outpp, lsb, fmask);
+                    new_pc_offset = 0;
+                } //if
+            } //if
+
+            // the lsb_bytes will never be changed, so we can use lmask to keep it
+            (*outpp)[0] = (static_cast<uint32_t>(new_pc_offset << (lsb - 2u)) & fmask) | (ins & lmask);
+            ++(*outpp);
+        } //if
+      }
+      break;
     case op_adrp:
         {
             current_idx           = ctxp->get_and_set_current_index(*inpp, *outpp);
@@ -405,8 +396,7 @@ static bool __fix_pcreladdr(instruction inpp, instruction outpp, context *ctxp)
 
 //-------------------------------------------------------------------------
 
-static void __fix_instructions(uint32_t *__restrict inp, int32_t count, uint32_t *__restrict outp)
-{
+static void __fix_instructions(uint32_t* __restrict inp, int32_t count, uint32_t* __restrict outp) {
     context ctx;
     ctx.basep = reinterpret_cast<int64_t>(inp);
     ctx.endp  = reinterpret_cast<int64_t>(inp + count);
@@ -481,11 +471,9 @@ extern "C" {
 
     //-------------------------------------------------------------------------
 
-    class A64HookInit
-    {
+    class A64HookInit {
     public:
-        A64HookInit()
-        {
+        A64HookInit() {
             __make_rwx(__insns_pool, sizeof(__insns_pool));
             A64_LOGI("insns pool initialized.");
         }
@@ -494,8 +482,7 @@ extern "C" {
 
     //-------------------------------------------------------------------------
 
-    static uint32_t *FastAllocateTrampoline()
-    {
+    static uint32_t* FastAllocateTrampoline() {
         static_assert((A64_MAX_INSTRUCTIONS * 10 * sizeof(uint32_t)) % 8 == 0, "8-byte align");
         static volatile int32_t __index = -1;
 
@@ -510,12 +497,12 @@ extern "C" {
 
     //-------------------------------------------------------------------------
 
-    A64_JNIEXPORT void *A64HookFunctionV(void *const symbol, void *const replace,
-                                         void *const rwx, const uintptr_t rwx_size)
-    {
+    A64_JNIEXPORT void* A64HookFunctionV(void* const symbol, void* const replace,
+                                         void* const rwx, const uintptr_t rwx_size) {
+
         static constexpr uint_fast64_t mask = 0x03ffffffu; // 0b00000011111111111111111111111111
 
-        uint32_t *trampoline = static_cast<uint32_t *>(rwx), *original = static_cast<uint32_t *>(symbol);
+        uint32_t* trampoline = static_cast<uint32_t*>(rwx), *original = static_cast<uint32_t*>(symbol);
 
         static_assert(A64_MAX_INSTRUCTIONS >= 5, "please fix A64_MAX_INSTRUCTIONS!");
         auto pc_offset = static_cast<int64_t>(__intval(replace) - __intval(symbol)) >> 2;
@@ -573,9 +560,8 @@ extern "C" {
 
     //-------------------------------------------------------------------------
 
-    A64_JNIEXPORT void A64HookFunction(void *const symbol, void *const replace, void **result)
-    {
-        void *trampoline = NULL;
+    A64_JNIEXPORT void A64HookFunction(void* const symbol, void* const replace, void** result) {
+        void* trampoline = NULL;
         if (result != NULL) {
             trampoline = FastAllocateTrampoline();
             *result = trampoline;
